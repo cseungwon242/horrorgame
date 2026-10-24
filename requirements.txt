@@ -1,0 +1,9 @@
+# Horror Game - Requirements
+# This is a static HTML/JavaScript game, no Python backend needed
+# For local development with Python server (optional):
+
+# If using Flask for serving:
+# Flask==2.3.0
+
+# If using simple HTTP server, no packages needed
+# Just run: python -m http.server 8000

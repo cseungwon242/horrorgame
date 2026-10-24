@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Horror Game</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; }
+        body { overflow: hidden; background: #000; }
+        #ui {
+            position: absolute; top: 20px; left: 20px; color: #00ff00;
+            font-family: monospace; font-size: 16px; z-index: 100;
+            background: rgba(0,0,0,0.7); padding: 15px; border: 1px solid #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <div id="ui">
+        <div><strong>CLASSROOM HALLWAY</strong></div>
+        <div id="lives">Lives: 5</div>
+        <div id="keys">Keys: 0/3</div>
+        <div id="status">Status: Safe</div>
+        <div id="monster">Monster: --</div>
+    </div>
+
+    <script>
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x3a3a4e);
+
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 2000);
+        camera.position.set(0, 1.6, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        document.body.appendChild(renderer.domElement);
+
+        const light1 = new THREE.AmbientLight(0xffffff, 1.5);
+        scene.add(light1);
+
+        const light2 = new THREE.DirectionalLight(0xffffff, 1.0);
+        light2.position.set(0, 50, 100);
+        scene.add(light2);
+
+        const gameState = {
+            lives: 5,
+            keys: 0,
+            hiding: false,
+            gameOver: false,
+            escaped: false
+        };
+
+        const player = {
+            pos: new THREE.Vector3(0, 1.6, 0),
+            rot: 0,
+            pitch: 0,
+            speed: 0.2
+        };
+
+        const monster = {
+            pos: new THREE.Vector3(0, 1.5, -85),
+            speed: 0.05,
+            chasing: false
+        };
+
+        const wallMat = new THREE.MeshPhongMaterial({ color: 0x4a4a5e });
+        const floorMat = new THREE.MeshPhongMaterial({ color: 0x5a5a6e });
+        const ceilingMat = new THREE.MeshPhongMaterial({ color: 0x2a2a3e });
+
+        // HALLWAY SECTIONS - properly connected
+        // Section 1: Straight forward (z=0 to z=80, x=0)
+        const floor1 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), floorMat);
+        floor1.rotation.x = -Math.PI / 2;
+        floor1.position.set(0, 0, 40);
+        scene.add(floor1);
+
+        const ceiling1 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), ceilingMat);
+        ceiling1.rotation.x = Math.PI / 2;
+        ceiling1.position.set(0, 3.9, 40);
+        scene.add(ceiling1);
+
+        const leftWall1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        leftWall1.position.set(-5, 2, 40);
+        scene.add(leftWall1);
+
+        const rightWall1 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        rightWall1.position.set(5, 2, 40);
+        scene.add(rightWall1);
+
+        // Section 2: Turn LEFT (z=80 to z=160, x moves from 0 to -5)
+        // This connects at z=80 from section 1
+        const floor2 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), floorMat);
+        floor2.rotation.x = -Math.PI / 2;
+        floor2.position.set(-5, 0, 120);
+        scene.add(floor2);
+
+        const ceiling2 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), ceilingMat);
+        ceiling2.rotation.x = Math.PI / 2;
+        ceiling2.position.set(-5, 3.9, 120);
+        scene.add(ceiling2);
+
+        const leftWall2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        leftWall2.position.set(-10, 2, 120);
+        scene.add(leftWall2);
+
+        const rightWall2 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        rightWall2.position.set(0, 2, 120);
+        scene.add(rightWall2);
+
+        // Transition wall at z=80 (right side only, left side open for turn)
+        const transWall1 = new THREE.Mesh(new THREE.BoxGeometry(5, 4, 0.5), wallMat);
+        transWall1.position.set(2.5, 2, 80);
+        scene.add(transWall1);
+
+        // Section 3: Turn RIGHT (z=160 to z=240, x moves from -5 to 5)
+        const floor3 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), floorMat);
+        floor3.rotation.x = -Math.PI / 2;
+        floor3.position.set(5, 0, 200);
+        scene.add(floor3);
+
+        const ceiling3 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), ceilingMat);
+        ceiling3.rotation.x = Math.PI / 2;
+        ceiling3.position.set(5, 3.9, 200);
+        scene.add(ceiling3);
+
+        const leftWall3 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        leftWall3.position.set(0, 2, 200);
+        scene.add(leftWall3);
+
+        const rightWall3 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        rightWall3.position.set(10, 2, 200);
+        scene.add(rightWall3);
+
+        // Transition wall at z=160 (left side only, right side open for turn)
+        const transWall2 = new THREE.Mesh(new THREE.BoxGeometry(5, 4, 0.5), wallMat);
+        transWall2.position.set(-2.5, 2, 160);
+        scene.add(transWall2);
+
+        // Section 4: Straight forward (z=240 to z=320, x=5)
+        const floor4 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), floorMat);
+        floor4.rotation.x = -Math.PI / 2;
+        floor4.position.set(5, 0, 280);
+        scene.add(floor4);
+
+        const ceiling4 = new THREE.Mesh(new THREE.PlaneGeometry(10, 80), ceilingMat);
+        ceiling4.rotation.x = Math.PI / 2;
+        ceiling4.position.set(5, 3.9, 280);
+        scene.add(ceiling4);
+
+        const leftWall4 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        leftWall4.position.set(0, 2, 280);
+        scene.add(leftWall4);
+
+        const rightWall4 = new THREE.Mesh(new THREE.BoxGeometry(0.5, 4, 80), wallMat);
+        rightWall4.position.set(10, 2, 280);
+        scene.add(rightWall4);
+
+        // Monster
+        const monsterGroup = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.2, 0.6), new THREE.MeshPhongMaterial({ color: 0x1a1a1a }));
+        body.position.y = 0.6;
+        monsterGroup.add(body);
+
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.8, 0.5), new THREE.MeshPhongMaterial({ color: 0x1a1a1a }));
+        head.position.y = 1.4;
+        monsterGroup.add(head);
+
+        const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        eyeL.position.set(-0.15, 1.5, 0.35);
+        monsterGroup.add(eyeL);
+
+        const eyeR = new THREE.Mesh(new THREE.SphereGeometry(0.12, 8, 8), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        eyeR.position.set(0.15, 1.5, 0.35);
+        monsterGroup.add(eyeR);
+
+        monsterGroup.position.copy(monster.pos);
+        scene.add(monsterGroup);
+
+        // FURNITURE - against walls
+        const cabinetList = [];
+        const lockerList = [];
+
+        // Cabinets on left wall (section 1)
+        for (let z = 20; z < 80; z += 30) {
+            const cab = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 0.4), new THREE.MeshPhongMaterial({ color: 0x3a3a4a }));
+            cab.position.set(-4.75, 0.9, z);
+            scene.add(cab);
+            cabinetList.push({ pos: cab.position, open: false, hasKey: Math.random() > 0.5 });
+        }
+
+        // Lockers on right wall (section 1)
+        for (let z = 30; z < 80; z += 40) {
+            const lock = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), new THREE.MeshPhongMaterial({ color: 0x5a5a6a }));
+            lock.position.set(4.75, 0.8, z);
+            scene.add(lock);
+            lockerList.push({ pos: lock.position, occupied: false, canOpen: Math.random() > 0.7 });
+        }
+
+        // Cabinets on outer wall (section 2 - left turn)
+        for (let z = 100; z < 160; z += 35) {
+            const cab = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.8, 0.4), new THREE.MeshPhongMaterial({ color: 0x3a3a4a }));
+            cab.position.set(-9.75, 0.9, z);
+            scene.add(cab);
+            cabinetList.push({ pos: cab.position, open: false, hasKey: Math.random() > 0.5 });
+        }
+
+        // Lockers on inner wall (section 2)
+        for (let z = 110; z < 160; z += 40) {
+            const lock = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.6, 0.35), new THREE.MeshPhongMaterial({ color: 0x5a5a6a }));
+            lock.position.set(0.25, 0.8, z);
+            scene.add(lock);
+            lockerList.push({ pos: lock.position, occupied: false, canOpen: Math.random() > 0.7 });
+        }
+
+        // Keys
+        const keyList = [];
+        function createKey(x, z) {
+            const g = new THREE.Group();
+            const head = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 0.1, 16), new THREE.MeshPhongMaterial({ color: 0xFFD700, emissive: 0xFFAA00 }));
+            head.position.y = 1.2;
+            g.add(head);
+            const shaft = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.08, 0.65), new THREE.MeshPhongMaterial({ color: 0xFFD700, emissive: 0xFFAA00 }));
+            shaft.position.y = 1.2;
+            shaft.position.z = 0.45;
+            g.add(shaft);
+            g.position.set(x, 0, z);
+            g.rotation.x = Math.PI / 4;
+            scene.add(g);
+            const k = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1));
+            k.position.copy(g.position);
+            k.collected = false;
+            keyList.push(k);
+        }
+
+        createKey(0, 30);
+        createKey(0, 130);
+        createKey(5, 250);
+
+        // Exit
+        const exitDoor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 2.2, 0.3), new THREE.MeshPhongMaterial({ color: 0x8B4513 }));
+        exitDoor.position.set(5, 1.1, 310);
+        scene.add(exitDoor);
+
+        // Input
+        const keysDown = {};
+        document.addEventListener('keydown', (e) => {
+            keysDown[e.key.toLowerCase()] = true;
+            if (e.key === 'e' || e.key === 'E') gameState.hiding = !gameState.hiding;
+            if (e.code === 'Space' && gameState.hiding) gameState.hiding = false;
+        });
+        document.addEventListener('keyup', (e) => {
+            keysDown[e.key.toLowerCase()] = false;
+        });
+
+        document.addEventListener('mousemove', (e) => {
+            if (document.pointerLockElement === renderer.domElement) {
+                player.rot -= e.movementX * 0.003;
+                player.pitch -= e.movementY * 0.003;
+                player.pitch = Math.max(-Math.PI/2, Math.min(Math.PI/2, player.pitch));
+            }
+        });
+
+        renderer.domElement.addEventListener('click', () => {
+            renderer.domElement.requestPointerLock();
+        });
+
+        function animate() {
+            if (!gameState.escaped && !gameState.gameOver) {
+                if (!gameState.hiding) {
+                    let mx = 0, mz = 0;
+                    if (keysDown['w']) mz -= player.speed;
+                    if (keysDown['s']) mz += player.speed;
+                    if (keysDown['a']) mx -= player.speed;
+                    if (keysDown['d']) mx += player.speed;
+
+                    if (mx !== 0 || mz !== 0) {
+                        const c = Math.cos(player.rot);
+                        const s = Math.sin(player.rot);
+                        const nx = player.pos.x + (mx*c - mz*s);
+                        const nz = player.pos.z + (mx*s + mz*c);
+
+                        // Simple boundary checks for each section
+                        let canMove = false;
+                        if (nz < 80) canMove = Math.abs(nx) < 4.7;
+                        else if (nz < 160) canMove = nx > -9.7 && nx < 0.7;
+                        else if (nz < 240) canMove = nx > -0.7 && nx < 9.7;
+                        else canMove = nx > -0.7 && nx < 9.7;
+
+                        if (canMove && nz < 330) {
+                            player.pos.x = nx;
+                            player.pos.z = nz;
+                        }
+                    }
+                }
+
+                camera.position.copy(player.pos);
+                camera.rotation.order = 'YXZ';
+                camera.rotation.y = player.rot;
+                camera.rotation.x = player.pitch;
+
+                const dx = player.pos.x - monster.pos.x;
+                const dz = player.pos.z - monster.pos.z;
+                const dist = Math.sqrt(dx*dx + dz*dz);
+
+                if (gameState.hiding) {
+                    monster.chasing = false;
+                } else if (dist < 50) {
+                    monster.chasing = true;
+                    const angle = Math.atan2(dz, dx);
+                    monster.pos.x += Math.cos(angle) * monster.speed * 1.5;
+                    monster.pos.z += Math.sin(angle) * monster.speed * 1.5;
+                } else {
+                    monster.chasing = false;
+                    monster.pos.z += monster.speed * 0.8;
+                }
+
+                monsterGroup.position.copy(monster.pos);
+
+                if (!gameState.hiding && dist < 0.8) {
+                    gameState.lives--;
+                    gameState.keys = 0;
+                    if (gameState.lives <= 0) {
+                        gameState.gameOver = true;
+                    } else {
+                        player.pos.set(0, 1.6, 0);
+                        monster.pos.set(0, 1.5, -85);
+                    }
+                }
+
+                keyList.forEach(k => {
+                    if (!k.collected && player.pos.distanceTo(k.position) < 1.5) {
+                        k.collected = true;
+                        gameState.keys++;
+                    }
+                });
+
+                if (gameState.keys >= 3 && player.pos.distanceTo(exitDoor.position) < 2) {
+                    gameState.escaped = true;
+                }
+
+                document.getElementById('lives').textContent = `Lives: ${gameState.lives}`;
+                document.getElementById('keys').textContent = `Keys: ${gameState.keys}/3`;
+
+                let status = 'Safe';
+                if (gameState.hiding) status = 'HIDING';
+                else if (monster.chasing) status = 'DANGER';
+                else if (dist < 60) status = 'ALERT';
+                document.getElementById('status').textContent = `Status: ${status}`;
+                document.getElementById('monster').textContent = `Monster: ${Math.round(dist)}m`;
+            } else if (gameState.gameOver) {
+                document.getElementById('status').textContent = 'GAME OVER';
+            } else if (gameState.escaped) {
+                document.getElementById('status').textContent = 'ESCAPED!';
+            }
+
+            renderer.render(scene, camera);
+            requestAnimationFrame(animate);
+        }
+
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
